@@ -89,114 +89,6 @@ chmod +x deploy-sam.sh
 ./deploy-sam.sh
 ```
 
-Or manually:
-```bash
-# 1. Get AWS Account ID
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-LAMBDA_REGION="us-east-2"
-AGENT_REGION="us-east-2"
-ECR_REPO_NAME="fraud-risk-scorer"
-FUNCTION_NAME="fn-Fraud-Detection"
-LAYER_NAME="lr-FraudDetection"
-
-# 2. Build and push Docker image for Bedrock AgentCore agent
-cd FraudDetection-Agent
-
-# Create ECR repository if it doesn't exist
-aws ecr create-repository --repository-name $ECR_REPO_NAME --region $AGENT_REGION || true
-
-# Login to ECR
-aws ecr get-login-password --region $AGENT_REGION | \
-  docker login --username AWS --password-stdin \
-  $ACCOUNT_ID.dkr.ecr.$AGENT_REGION.amazonaws.com
-
-# Build and push ARM64 image
-docker buildx create --use --name sam-builder 2>/dev/null || docker buildx use sam-builder
-docker buildx build --platform linux/arm64 \
-  -t $ACCOUNT_ID.dkr.ecr.$AGENT_REGION.amazonaws.com/$ECR_REPO_NAME:latest \
-  --push .
-
-cd ..
-
-# 3. Build Lambda function and layer packages
-cd FraudDetection-Lambda
-
-# Clean and install dependencies
-rm -rf node_modules dist function.zip layer.zip || true
-npm install
-
-# Compile TypeScript
-tsc
-
-# Create function package
-cd dist && zip -qr ../function.zip . && cd ..
-zip -r function.zip package.json
-
-# Create layer package
-mkdir -p layer/nodejs
-cp -r node_modules layer/nodejs/
-cd layer && zip -qr ../layer.zip . && cd ..
-
-# 4. Create S3 bucket for deployment artifacts
-BUCKET_NAME="durable-functions-$ACCOUNT_ID"
-
-# Create bucket with proper configuration
-if [ "$LAMBDA_REGION" = "us-east-1" ]; then
-    aws s3api create-bucket --bucket $BUCKET_NAME --region $LAMBDA_REGION
-else
-    aws s3api create-bucket --bucket $BUCKET_NAME --region $LAMBDA_REGION \
-        --create-bucket-configuration LocationConstraint=$LAMBDA_REGION
-fi
-
-# Enable versioning and encryption
-aws s3api put-bucket-versioning --bucket $BUCKET_NAME \
-    --versioning-configuration Status=Enabled --region $LAMBDA_REGION
-
-aws s3api put-bucket-encryption --bucket $BUCKET_NAME --region $LAMBDA_REGION \
-    --server-side-encryption-configuration '{
-        "Rules": [{
-            "ApplyServerSideEncryptionByDefault": {
-                "SSEAlgorithm": "AES256"
-            }
-        }]
-    }'
-
-# Block public access
-aws s3api put-public-access-block --bucket $BUCKET_NAME --region $LAMBDA_REGION \
-    --public-access-block-configuration \
-    BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
-
-# 5. Upload packages to S3
-aws s3 cp function.zip s3://$BUCKET_NAME/functions/$FUNCTION_NAME.zip --region $LAMBDA_REGION
-aws s3 cp layer.zip s3://$BUCKET_NAME/layers/$LAYER_NAME.zip --region $LAMBDA_REGION
-
-# Clean up build artifacts
-rm -rf node_modules dist layer function.zip layer.zip
-
-cd ..
-
-# 6. Deploy SAM application
-sam deploy \
-    --stack-name fraud-detection-durable-function \
-    --capabilities CAPABILITY_NAMED_IAM \
-    --region $LAMBDA_REGION \
-    --parameter-overrides \
-        FunctionName=$FUNCTION_NAME \
-        LayerName=$LAYER_NAME \
-        RoleName=durable-function-execution-role \
-        AgentRuntimeName=fraud_risk_scorer \
-        AgentRoleName=bedrock-agentcore-runtime-fraud-role \
-        ECRRepoName=$ECR_REPO_NAME \
-        LambdaRegion=$LAMBDA_REGION \
-        AgentRegion=$AGENT_REGION \
-    --no-fail-on-empty-changeset
-
-# 7. Wait for deployment completion
-aws cloudformation wait stack-create-complete \
-    --stack-name fraud-detection-durable-function \
-    --region $LAMBDA_REGION
-```
-
 ### Deployment Process
 
 The following will install:
@@ -215,17 +107,17 @@ Check that both components are deployed:
 
 ```bash
 # Check agent runtime status
-aws bedrock-agentcore-control list-agent-runtimes --region us-east-2
+aws bedrock-agentcore-control list-agent-runtimes --region us-east-1
 
 # Check Lambda function
 aws lambda get-function \
   --function-name fn-Fraud-Detection \
-  --region us-east-2
+  --region us-east-1
 
 # For SAM deployments, check stack status
 aws cloudformation describe-stacks \
   --stack-name fraud-detection-durable-function \
-  --region us-east-2
+  --region us-east-1
 ```
 
 ## Usage
@@ -249,36 +141,6 @@ The script will prompt you for:
 - **Vendor** (default: "Amazon")
 - **Initial Score** (default: 0) - Set to 0 to use the Bedrock Agent, or 1-5 to override
 
-**Risk Score Behavior**:
-- Amounts < $1,000: Agent returns scores 1-2 (auto-approved)
-- Amounts $1,000-$4,999: Agent returns scores 1-4 (weighted toward lower scores)
-- Amounts $5,000-$9,999: Agent returns scores 3-5 (higher risk, weighted toward lower scores)
-- Amount = $6500: Agent returns 3 (forces human-in-the-loop)
-- Amounts >= $10,000: Agent returns scores 5 (Send to Fraud)
-
-### Example Invocations
-
-**Low Risk Transaction (Auto-Approve)**:
-```bash
-./invoke-function.sh
-# Enter amount: 500
-# Result: Automatically authorized (score < 3)
-```
-
-**High Risk Transaction (Auto-Reject)**:
-```bash
-./invoke-function.sh
-# Enter amount: 10000
-# Result: Sent to fraud department (score 5)
-```
-
-**Medium Risk Transaction (Human Verification)**:
-```bash
-./invoke-function.sh
-# Enter amount: 6500
-# Result: Triggers email/SMS verification callbacks (score 3)
-```
-
 ### Handling Human-in-the-Loop Callbacks
 
 When a transaction requires human verification (risk score 3-4), the function will:
@@ -299,7 +161,7 @@ Option 2 - From Execution History:
 ```bash
 aws lambda get-durable-execution-history \
   --durable-execution-arn <ARN_FROM_INVOKE_OUTPUT> \
-  --region us-east-2 \
+  --region us-east-1 \
   --include-execution-data
 ```
 
@@ -404,17 +266,17 @@ aws logs tail /aws/lambda/fn-Fraud-Detection \
 # List all executions
 aws lambda list-durable-executions-by-function \
   --function-name fn-Fraud-Detection \
-  --region us-east-2
+  --region us-east-1
 
 # Get specific execution details
 aws lambda get-durable-execution \
   --durable-execution-arn <ARN> \
-  --region us-east-2
+  --region us-east-1
 
 # View execution history with data
 aws lambda get-durable-execution-history \
   --durable-execution-arn <ARN> \
-  --region us-east-2 \
+  --region us-east-1 \
   --include-execution-data
 ```
 
@@ -422,7 +284,7 @@ aws lambda get-durable-execution-history \
 ```bash
 # View agent runtime logs
 aws logs tail /aws/bedrock-agentcore/runtimes/fraud_risk_scorer-<ID>-DEFAULT \
-  --region us-east-2 \
+  --region us-east-1 \
   --follow
 ```
 
@@ -450,7 +312,7 @@ The deployment creates resources with these default configurations:
 
 #### Lambda Function
 - **Name**: `fn-Fraud-Detection`
-- **Region**: `us-east-2` (configurable)
+- **Region**: `us-east-1` (configurable)
 - **Runtime**: Node.js 24.x
 - **Timeout**: 120 seconds (per invocation)
 - **Execution Timeout**: 600 seconds (total durable execution)
@@ -460,7 +322,7 @@ The deployment creates resources with these default configurations:
 
 #### Bedrock AgentCore Agent
 - **Name**: `fraud_risk_scorer`
-- **Region**: `us-east-2` (required for Bedrock AgentCore)
+- **Region**: `us-east-1` (required for Bedrock AgentCore)
 - **Runtime**: Python 3.11 (FastAPI + Uvicorn)
 - **Platform**: ARM64 (Graviton)
 - **Port**: 8080
@@ -502,7 +364,7 @@ Edit the variables at the top of `deploy.sh`:
 ```bash
 FUNCTION_NAME="fn-Fraud-Detection"
 LAYER_NAME="lr-FraudDetection"
-REGION="us-east-2"
+REGION="us-east-1"
 ROLE_NAME="durable-function-execution-role"
 # ... other variables
 ```
@@ -530,12 +392,12 @@ ROLE_NAME="durable-function-execution-role"
 
 ```bash
 # Delete entire stack (recommended)
-sam delete --stack-name fraud-detection-durable-function --region us-east-2
+sam delete --stack-name fraud-detection-durable-function --region us-east-1
 
 # Or use CloudFormation directly
 aws cloudformation delete-stack \
   --stack-name fraud-detection-durable-function \
-  --region us-east-2
+  --region us-east-1
 ```
 
 ### Shell Script Deployment Cleanup
@@ -544,12 +406,12 @@ aws cloudformation delete-stack \
 # Delete Lambda function
 aws lambda delete-function \
   --function-name fn-Fraud-Detection \
-  --region us-east-2
+  --region us-east-1
 
 # Delete agent runtime (get runtime ID from list-agent-runtimes)
 aws bedrock-agentcore-control delete-agent-runtime \
   --agent-runtime-id <RUNTIME_ID> \
-  --region us-east-2
+  --region us-east-1
 
 # Delete S3 bucket (if desired)
 aws s3 rb s3://durable-functions-<ACCOUNT_ID> --force
@@ -561,7 +423,7 @@ aws iam delete-role --role-name bedrock-agentcore-runtime-fraud-role
 # Delete ECR repository
 aws ecr delete-repository \
   --repository-name fraud-risk-scorer \
-  --region us-east-2 \
+  --region us-east-1 \
   --force
 ```
 
