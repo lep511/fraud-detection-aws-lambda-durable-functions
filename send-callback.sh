@@ -5,7 +5,7 @@
 set -e
 
 # 📝 DECLARE VARIABLES
-REGION="us-east-2"
+REGION="us-east-1"
 
 echo "📞 Send Callback to Durable Function"
 echo "===================================="
@@ -40,6 +40,7 @@ case $CALLBACK_TYPE in
     
     # SEND SUCCESS CALLBACK
     aws lambda send-durable-execution-callback-success \
+      --cli-binary-format raw-in-base64-out \
       --callback-id "$CALLBACK_ID" \
       --result "$RESULT_PAYLOAD" \
       --region $REGION 
@@ -66,6 +67,7 @@ EOF
     
     # SEND FAILURE CALLBACK
     aws lambda send-durable-execution-callback-failure \
+      --cli-binary-format raw-in-base64-out \
       --callback-id "$CALLBACK_ID" \
       --error "$ERROR_OBJECT" \
       --region $REGION 
