@@ -1,0 +1,14 @@
+[project]
+name = "frauddetection-lambda"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "aws-durable-execution-sdk-python==1.0.0.post1",
+    "boto3>=1.42.58",
+]
+
+[tool.uv]
+package = true
+
+[tool.setuptools]
+py-modules = ["app"]
