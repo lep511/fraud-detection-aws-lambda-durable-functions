@@ -12,8 +12,17 @@ Usage:
 """
 
 import json
+import logging
+import time
+import traceback
+
 from strands import Agent, tool
 from strands.models import BedrockModel  # or use AnthropicModel
+
+logger = logging.getLogger("fraud-agent.detection")
+
+
+MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 
 
 # ─────────────────────────────────────────────
@@ -195,33 +204,53 @@ def calculate_fraud_score(amount_score: int, vendor_score: int, location_score: 
 # ─────────────────────────────────────────────
 
 SYSTEM_PROMPT = """
-You are FraudGuard, an expert AI fraud detection agent for a financial institution.
+You are FraudGuard, a fraud detection agent for a financial institution.
+Your sole task is to evaluate whether a transaction is fraudulent using the tools provided.
 
-Your mission is to analyze incoming transactions and determine whether they are
-fraudulent, suspicious, or legitimate.
+## REQUIRED TOOL EXECUTION — Follow this exact sequence, no exceptions:
 
-For EVERY transaction you receive, you MUST:
-1. Call `check_transaction_amount` with the transaction amount
-2. Call `check_vendor_risk` with the vendor name
-3. Call `check_location_risk` with the transaction location
-4. Call `calculate_fraud_score` using the three risk scores obtained above
-5. Return ONLY a valid raw JSON object — no markdown, no code blocks, no extra text.
+Step 1: call `check_transaction_amount(amount)`
+Step 2: call `check_vendor_risk(vendor_name)`
+Step 3: call `check_location_risk(location)`
+Step 4: call `calculate_fraud_score(amount_score, vendor_score, location_score)`
+         → use the three scores returned in steps 1–3
 
-The JSON response must follow this exact format:
+Do NOT skip, reorder, or infer any step. All four tools must be called for every transaction.
+
+## OUTPUT RULES
+
+After completing all tool calls, respond with a single raw JSON object.
+
+Constraints:
+- No markdown
+- No code fences
+- No explanation outside the JSON
+- No additional keys
+
+Required format:
 {
-    "risk_score": <integer from 1 to 5>,
-    "risk_detail": "<brief explanation of why the transaction is or isn't fraudulent>",
-    "amount": <original transaction amount as a number>
+    "risk_score": <integer 1–5>,
+    "risk_detail": "<one concise sentence explaining the risk assessment>",
+    "amount": <transaction amount as a number>
 }
 
-Risk score mapping based on the total fraud score (0–100):
-- 1 → Completely safe    (total score 0–19)
-- 2 → Low risk           (total score 20–39)
-- 3 → Suspicious         (total score 40–54)
-- 4 → High risk          (total score 55–69)
-- 5 → Fraudulent         (total score 70–100)
+## RISK SCORE MAPPING
 
-Be decisive, professional, and precise. Financial security depends on your accuracy.
+Map the total fraud score (0–100) returned by `calculate_fraud_score` to risk_score:
+
+| Total Score | risk_score | Label          |
+|-------------|------------|----------------|
+| 0–19        | 1          | Safe           |
+| 20–39       | 2          | Low risk       |
+| 40–54       | 3          | Suspicious     |
+| 55–69       | 4          | High risk      |
+| 70–100      | 5          | Fraudulent     |
+
+## ERROR HANDLING
+
+If any tool call fails or returns an unexpected value:
+- Do not guess or proceed
+- Return: {"error": "Tool <tool_name> failed. Cannot assess transaction."}
 """
 
 
@@ -237,11 +266,17 @@ def create_fraud_agent() -> Agent:
     Returns:
         Configured Agent ready to analyze transactions.
     """
-    # Use Bedrock (AWS) or swap for AnthropicModel / OpenAIModel as needed
-    model = BedrockModel(
-        model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",  # Claude Sonnet 4 via AWS Bedrock
-        region_name="us-east-1",
-    )
+    logger.info("Creating Strands agent with BedrockModel (claude-sonnet-4)...")
+    try:
+        model = BedrockModel(
+            model_id=MODEL_ID,
+            region_name="us-east-1",
+        )
+        logger.info("BedrockModel initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize BedrockModel: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        raise
 
     agent = Agent(
         model=model,
@@ -252,9 +287,10 @@ def create_fraud_agent() -> Agent:
             check_location_risk,
             calculate_fraud_score,
         ],
-        callback_handler=None,  # Disable default stdout streaming to avoid duplicate output
+        callback_handler=None,
     )
 
+    logger.info("Strands Agent created successfully with 4 tools")
     return agent
 
 
@@ -277,9 +313,10 @@ def analyze_transaction(transaction: dict) -> dict:
     Returns:
         dict with keys: risk_score (1-5), risk_detail (str), amount (float)
     """
+    logger.info(f"analyze_transaction called with: {json.dumps(transaction)}")
+
     agent = create_fraud_agent()
 
-    # Build a natural-language prompt from the structured transaction data
     prompt = f"""
     Please analyze the following transaction for fraud:
 
@@ -292,17 +329,31 @@ def analyze_transaction(transaction: dict) -> dict:
     ONLY the JSON response as instructed.
     """
 
-    # Invoke the agent — Strands handles tool orchestration automatically
-    raw_response = str(agent(prompt)).strip()
+    logger.debug(f"Sending prompt to agent:\n{prompt}")
 
-    # Parse the JSON string returned by the agent into a Python dict
+    try:
+        start = time.time()
+        raw_response = str(agent(prompt)).strip()
+        elapsed = time.time() - start
+        logger.info(f"Agent raw response ({elapsed:.2f}s): {raw_response[:500]}")
+    except Exception as e:
+        logger.error(f"Agent invocation FAILED: {type(e).__name__}: {e}")
+        logger.error(traceback.format_exc())
+        raise
+
     try:
         response = json.loads(raw_response)
+        logger.info(f"Parsed response successfully: {response}")
     except json.JSONDecodeError:
-        # Fallback: extract JSON block if the model wrapped it in extra text
+        logger.warning(f"JSON parse failed, attempting regex extraction from: {raw_response[:300]}")
         import re
         match = re.search(r'\{.*\}', raw_response, re.DOTALL)
-        response = json.loads(match.group()) if match else {"raw": raw_response}
+        if match:
+            response = json.loads(match.group())
+            logger.info(f"Regex extraction succeeded: {response}")
+        else:
+            logger.error(f"Could not extract JSON from agent response: {raw_response}")
+            response = {"raw": raw_response}
 
     return response
 

@@ -39,6 +39,16 @@ Parameters:
     Default: 'us-east-1'
     Description: 'Region for Bedrock AgentCore'
 
+  CodeVersion:
+    Type: String
+    Default: ''
+    Description: 'S3 object version ID of the Lambda code zip (forces redeployment on code changes)'
+
+  ImageDigest:
+    Type: String
+    Default: 'latest'
+    Description: 'Docker image digest (sha256:...) to force redeployment on code changes'
+
   ExecutionTimeout:
     Type: Number
     Default: 600
@@ -195,6 +205,7 @@ Resources:
       CodeUri:
         Bucket: !Sub 'durable-functions-${AWS::AccountId}'
         Key: !Sub 'functions/${FunctionName}.zip'
+        Version: !Ref CodeVersion
       Handler: app.handler
       Runtime: python3.13
       Timeout: 120
@@ -218,7 +229,7 @@ Resources:
       RoleArn: !GetAtt BedrockAgentCoreRole.Arn
       AgentRuntimeArtifact:
         ContainerConfiguration:
-          ContainerUri: !Sub '${AWS::AccountId}.dkr.ecr.${AgentRegion}.amazonaws.com/${ECRRepoName}:latest'
+          ContainerUri: !Sub '${AWS::AccountId}.dkr.ecr.${AgentRegion}.amazonaws.com/${ECRRepoName}@${ImageDigest}'
       NetworkConfiguration:
         NetworkMode: PUBLIC
       Tags:

@@ -45,6 +45,21 @@ fi
 echo "✅ Prerequisites checked"
 echo ""
 
+# Run unit tests for FraudDetection-Lambda before proceeding
+echo "🧪 Running FraudDetection-Lambda tests..."
+cd FraudDetection-Lambda
+
+pip install pytest --quiet --break-system-packages 2>/dev/null
+
+if ! python3 -m pytest test_app.py -v; then
+    echo "❌ Tests failed. Aborting deployment."
+    exit 1
+fi
+
+echo "✅ All tests passed"
+echo ""
+cd ..
+
 # Build and push Docker image for agent
 echo "🐳 Building and pushing agent Docker image..."
 cd FraudDetection-Agent
@@ -63,6 +78,15 @@ aws ecr get-login-password --region $AGENT_REGION | docker login --username AWS 
 echo "🏗️ Building and pushing Docker image..."
 docker buildx create --use --name sam-builder 2>/dev/null || docker buildx use sam-builder
 docker buildx build --platform linux/arm64 -t $ECR_URI:latest --push .
+
+# Get the image digest to force CloudFormation to detect changes
+IMAGE_DIGEST=$(aws ecr describe-images \
+    --repository-name $ECR_REPO_NAME \
+    --region $AGENT_REGION \
+    --image-ids imageTag=latest \
+    --query 'imageDetails[0].imageDigest' \
+    --output text)
+echo "📋 Image digest: $IMAGE_DIGEST"
 
 echo "✅ Docker image pushed to ECR"
 cd ..
@@ -115,7 +139,14 @@ if ! aws s3api head-bucket --bucket $BUCKET_NAME --region $LAMBDA_REGION 2>/dev/
 fi
 
 echo "⬆️  Uploading function package to S3..."
-aws s3 cp function.zip s3://$BUCKET_NAME/functions/$FUNCTION_NAME.zip --region $LAMBDA_REGION
+CODE_VERSION=$(aws s3api put-object \
+    --bucket $BUCKET_NAME \
+    --key "functions/$FUNCTION_NAME.zip" \
+    --body function.zip \
+    --region $LAMBDA_REGION \
+    --query 'VersionId' \
+    --output text)
+echo "📋 Code S3 version: $CODE_VERSION"
 
 echo "🧹 Cleaning up build artifacts..."
 rm -rf package function.zip
@@ -138,13 +169,9 @@ sam deploy \
         ECRRepoName=$ECR_REPO_NAME \
         LambdaRegion=$LAMBDA_REGION \
         AgentRegion=$AGENT_REGION \
+        CodeVersion=$CODE_VERSION \
+        ImageDigest=$IMAGE_DIGEST \
     --no-fail-on-empty-changeset
-
-echo ""
-echo "⏳ Waiting for stack deployment to complete..."
-
-aws cloudformation wait stack-update-complete --stack-name $STACK_NAME --region $LAMBDA_REGION 2>/dev/null || \
-aws cloudformation wait stack-create-complete --stack-name $STACK_NAME --region $LAMBDA_REGION
 
 # Get outputs
 echo "📋 Retrieving stack outputs..."
@@ -180,16 +207,16 @@ echo "     --invocation-type Event \\"
 echo "     --cli-binary-format raw-in-base64-out \\"
 echo "     --payload '{\"id\":1,\"amount\":500,\"location\":\"New York\",\"vendor\":\"Amazon\"}' \\"
 echo "     --region $LAMBDA_REGION \\"
-echo "     output-low-risk.json"
+echo "     /dev/null"
 echo ""
 echo "2️⃣  High Risk Transaction (Send to Fraud, score = 5):"
 echo "   aws lambda invoke \\"
 echo "     --function-name '$FUNCTION_NAME:\$LATEST' \\"
 echo "     --invocation-type Event \\"
 echo "     --cli-binary-format raw-in-base64-out \\"
-echo "     --payload '{\"id\":2,\"amount\":10000,\"location\":\"Unknown\",\"vendor\":\"Suspicious Store\"}' \\"
+echo "     --payload '{\"id\":2,\"amount\":10000,\"location\":\"Las Vegas\",\"vendor\":\"crypto\"}' \\"
 echo "     --region $LAMBDA_REGION \\"
-echo "     output-high-risk.json"
+echo "     /dev/null"
 echo ""
 echo "3️⃣  Medium Risk Transaction (Human Verification, score 3-4):"
 echo "   aws lambda invoke \\"
@@ -198,7 +225,7 @@ echo "     --invocation-type Event \\"
 echo "     --cli-binary-format raw-in-base64-out \\"
 echo "     --payload '{\"id\":3,\"amount\":6500,\"location\":\"Los Angeles\",\"vendor\":\"Electronics Store\"}' \\"
 echo "     --region $LAMBDA_REGION \\"
-echo "     output-medium-risk.json"
+echo "     /dev/null"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "📊 MONITORING & DEBUGGING"

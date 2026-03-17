@@ -1,0 +1,166 @@
+# ============================================================
+# Python
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+wheels/
+share/python-wheels/
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.pyre/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+nosetests.xml
+test-results/
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+
+# ============================================================
+# AWS SAM
+# ============================================================
+.aws-sam/
+samconfig.toml
+
+# CloudFormation packaged templates
+packaged.yaml
+packaged-template.yaml
+
+# Lambda build artifacts
+.build/
+vendor/
+
+# LocalStack / local invoke artifacts
+/tmp/
+
+
+# ============================================================
+# AWS credentials & config
+# ============================================================
+.aws/
+aws-exports.js
+*.pem
+credentials
+.env.local
+.env.*.local
+
+
+# ============================================================
+# Claude Code
+# ============================================================
+.claude/
+CLAUDE.local.md
+
+
+# ============================================================
+# Environment & secrets
+# ============================================================
+.env
+.env.*
+!.env.example
+*.env
+secrets.yaml
+secrets.yml
+secrets.json
+*.secret
+
+
+# ============================================================
+# IDEs & editors
+# ============================================================
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+
+# PyCharm / JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim / Emacs
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+
+# ============================================================
+# OS artifacts
+# ============================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+
+# ============================================================
+# Logs & diagnostics
+# ============================================================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+
+# ============================================================
+# Terraform (común en stacks AWS)
+# ============================================================
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
