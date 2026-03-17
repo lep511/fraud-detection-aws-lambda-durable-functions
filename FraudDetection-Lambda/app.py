@@ -21,6 +21,17 @@ import boto3
 
 AGENT_RUNTIME_ARN = os.environ.get("AGENT_RUNTIME_ARN")
 AGENT_REGION = os.environ.get("AGENT_REGION", "us-east-1")
+SNS_TOPIC = os.environ.get("SNS_TOPIC")
+API_BASE_URL = os.environ.get("API_BASE_URL", "")
+
+_sns_client = None
+
+
+def _get_sns_client():
+    global _sns_client
+    if _sns_client is None:
+        _sns_client = boto3.client("sns")
+    return _sns_client
 
 
 # ── Retry strategy ───────────────────────────────────────────────────────────
@@ -131,7 +142,18 @@ def send_to_fraud(step_ctx: StepContext, tx: dict, customer_rejection: bool = Fa
 
 @durable_step
 def send_email_notification(step_ctx: StepContext, callback_id: str, tx: dict) -> None:
-    step_ctx.logger.info(f"Email notification sent with callbackId: {callback_id}")
+    verification_link = f"{API_BASE_URL}/verify?callbackId={callback_id}"
+    message = (
+        f"Fraud verification required for transaction {tx['id']}.\n"
+        f"Amount: ${tx['amount']}\n"
+        f"Click to verify: {verification_link}"
+    )
+    _get_sns_client().publish(
+        TopicArn=SNS_TOPIC,
+        Subject=f"Verify transaction {tx['id']}",
+        Message=message,
+    )
+    step_ctx.logger.info(f"Email notification sent to SNS with callbackId: {callback_id}")
 
 
 @durable_step

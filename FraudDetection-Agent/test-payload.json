@@ -1,1 +1,6 @@
-{"amount": 5000}
+{
+    "id": 1,
+    "amount": 5000,
+    "location": "New York",
+    "vendor": "Amazon"
+}

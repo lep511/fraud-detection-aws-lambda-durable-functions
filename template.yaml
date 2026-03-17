@@ -185,6 +185,15 @@ Resources:
                   - lambda:CheckpointDurableExecution
                   - lambda:GetDurableExecutionState
                 Resource: !Sub 'arn:aws:lambda:${LambdaRegion}:${AWS::AccountId}:function:${FunctionName}:*'
+        - PolicyName: SNSPublishPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowSNSPublish
+                Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref FraudVerificationTopic
         - PolicyName: BedrockAgentCoreInvokePolicy
           PolicyDocument:
             Version: '2012-10-17'
@@ -196,6 +205,13 @@ Resources:
                 Resource:
                   - !Sub '${AgentRuntime.AgentRuntimeArn}/*'
                   - !GetAtt AgentRuntime.AgentRuntimeArn
+
+  # SNS Topic for fraud verification notifications
+  FraudVerificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${FunctionName}-verification'
+      DisplayName: 'Fraud Verification Notifications'
 
   # Durable Lambda Function - Python with bundled dependencies
   FraudDetectionFunction:
@@ -215,6 +231,7 @@ Resources:
         Variables:
           AGENT_RUNTIME_ARN: !GetAtt AgentRuntime.AgentRuntimeArn
           AGENT_REGION: !Ref AgentRegion
+          SNS_TOPIC: !Ref FraudVerificationTopic
       DurableConfig:
         ExecutionTimeout: !Ref ExecutionTimeout
         RetentionPeriodInDays: !Ref RetentionPeriodInDays
@@ -266,3 +283,9 @@ Outputs:
     Value: !Ref FunctionName
     Export:
       Name: !Sub '${AWS::StackName}-LambdaFunctionName'
+
+  FraudVerificationTopicArn:
+    Description: 'SNS Topic ARN for fraud verification notifications'
+    Value: !Ref FraudVerificationTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-FraudVerificationTopicArn'

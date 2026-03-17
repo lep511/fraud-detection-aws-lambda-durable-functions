@@ -421,12 +421,24 @@ class TestNotificationSteps:
     """
 
     def test_send_email_notification(self):
-        # Verify the step logs the callback ID and returns None (fire-and-forget
-        # notification; the actual wait happens in wait_for_callback).
+        # Verify the step publishes to SNS and logs the callback ID.
         step_ctx = _make_step_ctx()
         tx = {"id": "t40", "amount": 300, "score": 3}
-        result = app.send_email_notification(step_ctx, "cb-123", tx)
+        mock_sns = MagicMock()
+        with patch.object(app, "_get_sns_client", return_value=mock_sns), \
+             patch.object(app, "SNS_TOPIC", "arn:aws:sns:us-east-1:123456789012:test-topic"), \
+             patch.object(app, "API_BASE_URL", "https://example.com"):
+            result = app.send_email_notification(step_ctx, "cb-123", tx)
         assert result is None
+        mock_sns.publish.assert_called_once_with(
+            TopicArn="arn:aws:sns:us-east-1:123456789012:test-topic",
+            Subject="Verify transaction t40",
+            Message=(
+                "Fraud verification required for transaction t40.\n"
+                "Amount: $300\n"
+                "Click to verify: https://example.com/verify?callbackId=cb-123"
+            ),
+        )
         step_ctx.logger.info.assert_called_once()
 
     def test_send_sms_notification(self):

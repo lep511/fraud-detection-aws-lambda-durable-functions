@@ -5,7 +5,13 @@
 set -e
 
 # 📝 DECLARE VARIABLES
-REGION="us-east-1"
+# Check if AWS_REGION environment variable is set, otherwise use default
+REGION="${AWS_REGION:-us-east-1}"
+if [ -z "$AWS_REGION" ]; then
+  echo "⚠️ Warning: AWS_REGION environment variable not set. Using default region: $REGION"
+else
+  echo "✅ AWS_REGION is set to: $REGION"
+fi
 
 echo "📞 Send Callback to Durable Function"
 echo "===================================="
