@@ -15,9 +15,10 @@ import json
 import logging
 import time
 import traceback
-
+import os
 from strands import Agent, tool
 from strands.models import BedrockModel  # or use AnthropicModel
+from strands.models.openai import OpenAIModel # for OpenAI compatible
 
 logger = logging.getLogger("fraud-agent.detection")
 
@@ -266,17 +267,42 @@ def create_fraud_agent() -> Agent:
     Returns:
         Configured Agent ready to analyze transactions.
     """
-    logger.info("Creating Strands agent with BedrockModel (claude-sonnet-4)...")
-    try:
-        model = BedrockModel(
-            model_id=MODEL_ID,
-            region_name="us-east-1",
-        )
-        logger.info("BedrockModel initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize BedrockModel: {type(e).__name__}: {e}")
-        logger.error(traceback.format_exc())
-        raise
+    logger.info("Creating Strands agent...")
+    model_api_key = os.environ.get("MODEL_API_KEY")
+
+    # Check if model_api_key exist to use compatbile OpenAI models
+    if model_api_key:
+        validate_config(["MODEL_BASE_URL", "MODEL_NAME"])
+        base_url = os.environ.get("MODEL_BASE_URL")
+        model_name = os.environ.get("MODEL_NAME")
+        
+        try:
+            model = OpenAIModel(
+                client_args={
+                    "api_key": model_api_key,
+                    "base_url": "https://integrate.api.nvidia.com/v1"
+                },
+                model_id="z-ai/glm5",
+                temperature=1,
+                top_p=1,
+                max_tokens=16384,
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI compatible agent: {type(e).__name__}: {e}")
+            logger.error(traceback.format_exc())
+            raise
+    # Use Bedrock model with AWS identification
+    else:
+        try:
+            model = BedrockModel(
+                model_id=MODEL_ID,
+                region_name="us-east-1",
+            )
+            logger.info("BedrockModel initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize BedrockModel: {type(e).__name__}: {e}")
+            logger.error(traceback.format_exc())
+            raise
 
     agent = Agent(
         model=model,
@@ -357,6 +383,14 @@ def analyze_transaction(transaction: dict) -> dict:
 
     return response
 
+def validate_config(required_vars: list):
+    missing_vars = [var for var in required_vars if var not in os.environ]
+    
+    if missing_vars:
+        raise EnvironmentError(
+            f"The following environment variables are missing: {', '.join(missing_vars)}. "
+            "Please set them before starting the application."
+        )
 
 # ─────────────────────────────────────────────
 # MAIN — Demo with sample transactions
