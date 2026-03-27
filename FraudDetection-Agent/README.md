@@ -106,7 +106,7 @@ uv init .
 
 **3. Add dependencies:**
 ```bash
-uv add strands-agents
+uv add strands-agents[openai]
 uv add strands-agents-tools
 uv add fastapi
 uv add uvicorn

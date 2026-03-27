@@ -8,7 +8,7 @@ dependencies = [
     "fastapi>=0.121.2",
     "httpx>=0.28.1",
     "pydantic>=2.12.4",
-    "strands-agents>=1.16.0",
+    "strands-agents[openai]>=1.33.0",
     "strands-agents-tools>=0.2.21",
     "uvicorn[standard]>=0.38.0",
 ]
