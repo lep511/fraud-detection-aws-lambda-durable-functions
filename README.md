@@ -2,6 +2,8 @@
 
 This project demonstrates AWS Lambda Durable Functions integrated with AWS Bedrock AgentCore for intelligent fraud detection. It showcases a multi-step, stateful workflow that can run for extended periods (up to one year) with automatic state persistence, human-in-the-loop verification, and AI-powered risk scoring.
 
+**For more information, see this [AWS blog post](https://aws.amazon.com/es/blogs/compute/best-practices-for-lambda-durable-functions-using-a-fraud-detection-example/).**
+
 ## Overview
 
 The fraud detection workflow:

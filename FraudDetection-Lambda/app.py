@@ -1,5 +1,6 @@
 import json
 import os
+import httpx
 from aws_durable_execution_sdk_python import (
     DurableContext,
     StepContext,
@@ -19,7 +20,9 @@ from aws_durable_execution_sdk_python.retries import (
 )
 import boto3
 
-AGENT_RUNTIME_ARN = os.environ.get("AGENT_RUNTIME_ARN")
+USE_BEDROCK_AGENTCORE = os.environ.get("USE_BEDROCK_AGENTCORE", False)
+AGENT_BASE_URL = os.environ.get("AGENT_BASE_URL", "")
+USE_BEDROCK_AGENTCORE = os.environ.get("USE_BEDROCK_AGENTCORE", "false").lower() == "true"
 AGENT_REGION = os.environ.get("AGENT_REGION", "us-east-1")
 SNS_TOPIC = os.environ.get("SNS_TOPIC")
 API_BASE_URL = os.environ.get("API_BASE_URL", "")
@@ -91,24 +94,54 @@ def check_fraud_score(
 
     step_ctx.logger.info("No score submitted, sending to Fraud Agent for assessment")
 
-    if not AGENT_RUNTIME_ARN:
-        raise ValueError("AGENT_RUNTIME_ARN environment variable is not set")
+    if USE_BEDROCK_AGENTCORE:
+        if not AGENT_RUNTIME_ARN:
+            raise ValueError("AGENT_RUNTIME_ARN environment variable is not set")
 
-    client = boto3.client("bedrock-agentcore", region_name=AGENT_REGION)
-    payload = json.dumps(
-        {"input": {"amount": amount, "location": location, "vendor": vendor}}
-    ).encode("utf-8")
+        client = boto3.client("bedrock-agentcore", region_name=AGENT_REGION)
+        payload = json.dumps(
+            {"input": {"amount": amount, "location": location, "vendor": vendor}}
+        ).encode("utf-8")
 
-    response = client.invoke_agent_runtime(
-        agentRuntimeArn=AGENT_RUNTIME_ARN,
-        qualifier="DEFAULT",
-        payload=payload,
-        contentType="application/json",
-        accept="application/json",
-    )
+        response = client.invoke_agent_runtime(
+            agentRuntimeArn=AGENT_RUNTIME_ARN,
+            qualifier="DEFAULT",
+            payload=payload,
+            contentType="application/json",
+            accept="application/json",
+        )
 
-    response_body = json.loads(response["response"].read())
-    step_ctx.logger.info(f"Agent response: {response_body}")
+        response_body = json.loads(response["response"].read())
+        step_ctx.logger.info(f"Agent response: {response_body}")
+    else:
+        if not AGENT_BASE_URL:
+            raise ValueError("AGENT_BASE_URL environment variable is not set")
+        else:
+            url = f"{AGENT_BASE_URL}/invocations"
+        
+        payload = {
+            "input": {
+                "id": 0,
+                "amount": amount,
+                "location": location,
+                "vendor": vendor
+            }
+        }
+
+        try:
+            response = httpx.post(url, json=payload, timeout=360.0)
+            response.raise_for_status()  # Throw an exception if status >= 400
+            response_body = response.json()
+            step_ctx.logger.info(f"Agent response: {response_body}")
+        except httpx.TimeoutException:
+            step_ctx.logger.error("The request took too long")
+            raise ValueError("The request took too long")
+        except httpx.ConnectError:
+            step_ctx.logger.error("Unable to connect to the server")
+            raise ValueError("Unable to connect to the server")
+        except httpx.HTTPStatusError as e:
+            step_ctx.logger.error(f"Error HTTP {e.response.status_code}")
+            raise ValueError(f"Error HTTP {e.response.status_code}")
 
     risk_score = response_body.get("output", {}).get("risk_score")
     if risk_score is not None and 1 <= risk_score <= 5:

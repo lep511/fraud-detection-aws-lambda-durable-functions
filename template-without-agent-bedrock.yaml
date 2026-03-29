@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'Fraud Detection Durable Function - Python - SAM Template'
+
+Parameters:
+  FunctionName:
+    Type: String
+    Default: 'fn-Fraud-Detection'
+    Description: 'Name of the Lambda function'
+
+  RoleName:
+    Type: String
+    Default: 'durable-function-execution-role'
+    Description: 'Name of the Lambda execution role'
+
+  LambdaRegion:
+    Type: String
+    Default: 'us-east-1'
+    Description: 'Region for Lambda deployment'
+
+  CodeVersion:
+    Type: String
+    Default: ''
+    Description: 'S3 object version ID of the Lambda code zip (forces redeployment on code changes)'
+
+  ExecutionTimeout:
+    Type: Number
+    Default: 600
+    MinValue: 1
+    MaxValue: 31622400
+    Description: 'Durable execution timeout in seconds (max 1 year)'
+
+  RetentionPeriodInDays:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 90
+    Description: 'Retention period for execution history in days'
+  
+  AgentBaseUrl:
+    Type: String
+    Description: 'Base URL for LLM agent'
+
+Globals:
+  Function:
+    Timeout: 120
+    MemorySize: 256
+    Runtime: python3.12
+
+Resources:
+  # IAM Role for Lambda Function
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaDurableExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AWSLambdaDurableExecutionRole
+                Effect: Allow
+                Action:
+                  - lambda:CheckpointDurableExecution
+                  - lambda:GetDurableExecutionState
+                Resource: !Sub 'arn:aws:lambda:${LambdaRegion}:${AWS::AccountId}:function:${FunctionName}:*'
+        - PolicyName: SNSPublishPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowSNSPublish
+                Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref FraudVerificationTopic
+
+  # SNS Topic for fraud verification notifications
+  FraudVerificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${FunctionName}-verification'
+      DisplayName: 'Fraud Verification Notifications'
+
+  # Durable Lambda Function - Python with bundled dependencies
+  FraudDetectionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      CodeUri:
+        Bucket: !Sub 'durable-functions-${AWS::AccountId}'
+        Key: !Sub 'functions/${FunctionName}.zip'
+        Version: !Ref CodeVersion
+      Handler: app.handler
+      Runtime: python3.13
+      Timeout: 120
+      MemorySize: 256
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          USE_BEDROCK_AGENTCORE: false
+          SNS_TOPIC: !Ref FraudVerificationTopic
+          AGENT_BASE_URL: !Ref AgentBaseUrl
+      DurableConfig:
+        ExecutionTimeout: !Ref ExecutionTimeout
+        RetentionPeriodInDays: !Ref RetentionPeriodInDays
+
+Outputs:
+  DeploymentBucket:
+    Description: 'S3 bucket for deployment artifacts'
+    Value: !Sub 'durable-functions-${AWS::AccountId}'
+    Export:
+      Name: !Sub '${AWS::StackName}-DeploymentBucket'
+
+  LambdaFunctionArn:
+    Description: 'Lambda Function ARN (with durable configuration)'
+    Value: !GetAtt FraudDetectionFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionArn'
+
+  LambdaFunctionName:
+    Description: 'Lambda Function Name'
+    Value: !Ref FunctionName
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionName'
+
+  FraudVerificationTopicArn:
+    Description: 'SNS Topic ARN for fraud verification notifications'
+    Value: !Ref FraudVerificationTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-FraudVerificationTopicArn'
