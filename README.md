@@ -42,7 +42,7 @@ If you're on macOS Catalina or later (which defaults to zsh), you can:
 ### Core Requirements
 
 1. **AWS CLI v2** with configured credentials
-2. **Docker Desktop** - Required for building containers and layers
+2. **Docker Desktop** - Required for building containers and layers (only for Bedrock AgentCore)
 3. **jq** - JSON processor for parsing outputs
 
 ### For SAM Deployment (Recommended)
@@ -93,6 +93,10 @@ chmod +x deploy-sam.sh
 
 ### Deployment Process
 
+Depending on the deployment method selected, the following steps are performed:
+
+#### With Bedrock Agent
+
 The following will install:
 1. **Build Agent Container**: Create and push Python FastAPI agent to ECR
 2. **Deploy Agent Runtime**: Create Bedrock AgentCore runtime with container
@@ -103,12 +107,21 @@ The following will install:
 
 **Note**: First deployment takes ~5-10 minutes due to Docker image building and ECR push.
 
+#### Without Bedrock AgentCore
+
+The following will install:
+1. **Build & Deploy Agent Container**: Create and deploy FastAPI in Python on a virtual machine or in containers
+2. **Create Infrastructure**: S3 bucket, IAM roles, Lambda layer
+3. **Deploy Lambda Function**: Durable function with proper configuration
+4. **Configure Permissions**: Set up cross-service permissions
+5. **Publish Version**: Create versioned deployment
+
 ### Verify Deployment
 
 Check that both components are deployed:
 
 ```bash
-# Check agent runtime status
+# Check agent runtime status (if Bedrock AgentCore is used)
 aws bedrock-agentcore-control list-agent-runtimes --region us-east-1
 
 # Check Lambda function
@@ -188,39 +201,11 @@ The script will prompt you for:
 - If **any** callback fails/rejects → Transaction is sent to fraud department
 - The parallel execution uses `toleratedFailureCount: 0`, so any failure immediately escalates
 
-## Project Structure
-
-```
-DFNs/
-├── template.yaml                      # SAM template (Infrastructure as Code)
-├── samconfig.toml                     # SAM configuration
-├── deploy-sam.sh                      # SAM deployment script
-├── invoke-function.sh                 # Interactive function invocation
-├── send-callback.sh                   # Send callback responses
-├── README.md                          # This file
-│
-├── FraudDetection-Agent/              # Bedrock AgentCore Agent
-│   ├── agent.py                       # FastAPI fraud detection agent
-│   ├── Dockerfile                     # Container definition (ARM64)
-│   ├── pyproject.toml                 # Python dependencies
-│   └── uv.lock                        # Package lock file
-│
-└── FraudDetection-Lambda/             # Durable Lambda Function
-    ├── src/
-    │   └── index.ts                   # Main Lambda handler 
-    ├── dist/                          # Compiled JavaScript (created after build)
-    │   └── index.js                   
-    ├── package.json                   # Node.js dependencies
-    ├── function.zip                   # Lambda deployment package (created after build)
-    ├── layer.zip                      # Lambda layer package (created after build)
-    └── tsconfig.json                  # TypeScript configuration
-```
-
 ### Key Files
 
 - **`template.yaml`**: SAM/CloudFormation template defining all AWS resources
 - **`samconfig.toml`**: Configuration for SAM CLI (regions, parameters, etc.)
-- **`deploy-sam.sh`**: Automated SAM deployment with Docker image building
+- **`deploy-sam.sh`**: Automated SAM deployment
 - **`invoke-function.sh`**: Interactive script for testing transactions
 - **`send-callback.sh`**: Script for responding to human verification callbacks
 
@@ -261,6 +246,44 @@ aws logs tail /aws/lambda/fn-Fraud-Detection \
 aws logs tail /aws/lambda/fn-Fraud-Detection \
   --region eu-south-1 \
   --since 1h
+```
+
+---
+
+**1️⃣ Low Risk Transaction (Auto-Approve, score < 3):**
+
+```bash
+aws lambda invoke \
+  --function-name 'fn-Fraud-Detection:$LATEST' \
+  --invocation-type Event \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"id":1,"amount":500,"location":"New York","vendor":"Amazon"}' \
+  --region us-east-1 \
+  /dev/null
+```
+
+**2️⃣ High Risk Transaction (Send to Fraud, score = 5):**
+
+```bash
+aws lambda invoke \
+  --function-name 'fn-Fraud-Detection:$LATEST' \
+  --invocation-type Event \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"id":2,"amount":10000,"location":"Las Vegas","vendor":"crypto"}' \
+  --region us-east-1 \
+  /dev/null
+```
+
+**3️⃣ Medium Risk Transaction (Human Verification, score 3-4):**
+
+```bash
+aws lambda invoke \
+  --function-name 'fn-Fraud-Detection:$LATEST' \
+  --invocation-type Event \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"id":3,"amount":1500,"location":"Barcelona","vendor":"Electronics Store"}' \
+  --region us-east-1 \
+  /dev/null
 ```
 
 ### Check Execution Status
